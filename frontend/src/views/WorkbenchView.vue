@@ -60,6 +60,15 @@
             >
               {{ action }}
             </button>
+            <button
+              v-if="meta.key === 'auto_match_job'"
+              class="link"
+              type="button"
+              :data-testid="`detail-${row.id}`"
+              @click="openDetail(row)"
+            >
+              任务详情
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -86,6 +95,50 @@
       </form>
     </div>
 
+    <div v-if="showDetail && detail" class="modal-backdrop" data-testid="detail-modal">
+      <section class="modal">
+        <h3>匹配任务详情：{{ detail.task_id }}</h3>
+        <dl class="dag-detail">
+          <div><dt>任务状态</dt><dd>{{ detail.status }}</dd></div>
+          <div><dt>输出簇数</dt><dd data-testid="detail-clusters">{{ detail.clusters_output }}</dd></div>
+          <div><dt>簇内成员数</dt><dd>{{ detail.member_count }}</dd></div>
+          <div><dt>复核入口簇数</dt><dd data-testid="detail-review-count">{{ detail.review_cluster_count }}</dd></div>
+          <div><dt>规则版本</dt><dd>{{ detail.rule_version || '—' }}</dd></div>
+          <div><dt>原规则版本</dt><dd>{{ detail.original_rule_version || '—' }}</dd></div>
+          <div><dt>任务发生时间</dt><dd>{{ detail.task_time || '—' }}</dd></div>
+          <div><dt>原任务时间</dt><dd>{{ detail.original_task_time || '—' }}</dd></div>
+        </dl>
+        <p v-if="!detail.member_recoverable" class="error-text" data-testid="detail-failure">
+          无法恢复原始成员数据：{{ detail.failure_reason }}
+        </p>
+        <p v-else-if="detail.status === '已失败'" class="error-text">{{ detail.failure_reason }}</p>
+        <table v-if="detail.clusters.length" class="data-table">
+          <thead>
+            <tr><th>簇编号</th><th>成员标识</th><th>规则版本</th><th>任务发生时间</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="cluster in detail.clusters" :key="cluster.簇编号">
+              <td>{{ cluster.簇编号 }}</td>
+              <td>{{ cluster.成员标识.join('、') }}</td>
+              <td>{{ cluster.规则版本 }}</td>
+              <td>{{ cluster.任务发生时间 }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="page-actions">
+          <RouterLink
+            v-if="detail.review_cluster_count"
+            class="btn"
+            :to="detail.review_entry.path"
+            data-testid="detail-review-link"
+          >
+            前往复核（{{ detail.review_entry.簇数量 }} 个簇）
+          </RouterLink>
+          <button class="btn" type="button" @click="showDetail = false">关闭</button>
+        </div>
+      </section>
+    </div>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条{{ meta.name }}记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -95,26 +148,48 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import {
   createEntry,
   downloadEntries,
+  getJobDetail,
   listEntries,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/backend-service'
+import type { JobDetail } from '@/api/backend-service'
 import type { EntryRow } from '@/data/types'
 
 const props = defineProps<{ moduleKey: string }>()
 const meta = moduleMeta(props.moduleKey)
+const route = useRoute()
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
+const filters = ref<Record<string, string>>(
+  Object.fromEntries(
+    Object.entries(route.query)
+      .filter(([field]) => meta.fields.includes(field))
+      .map(([field, value]) => [field, String(value)]),
+  ),
+)
 const filterFields = meta.fields.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const showDetail = ref(false)
+const detail = ref<JobDetail | null>(null)
+
+async function openDetail(row: EntryRow) {
+  errorMessage.value = ''
+  try {
+    detail.value = await getJobDetail(Number(row.id))
+    showDetail.value = true
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '任务详情读取失败'
+  }
+}
 const stats = computed(() => [
   { label: meta.metrics[0], value: total.value },
   { label: meta.metrics[1], value: rows.value.filter((row) => row.status === meta.statuses[1]).length },

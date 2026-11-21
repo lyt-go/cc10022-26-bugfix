@@ -37,6 +37,40 @@ export async function runAction(
   return await response.json()
 }
 
+export type JobDetail = {
+  task_id: string
+  status: string
+  entity_model: string
+  clusters_output: number
+  member_count: number
+  rule_id: string
+  rule_version: string
+  original_rule_version: string
+  task_time: string
+  original_task_time: string
+  clusters: {
+    簇编号: string
+    成员标识: string[]
+    规则版本: string
+    任务发生时间: string
+  }[]
+  review_entry: { 簇数量: number; 簇编号: string[]; path: string }
+  review_cluster_count: number
+  member_recoverable: boolean
+  failure_reason: string
+}
+
+export async function getJobDetail(id: number): Promise<JobDetail> {
+  const response = await request(`/api/auto_match_job/${id}/detail`)
+  if (!response.ok) throw new Error('任务详情读取失败')
+  return await response.json()
+}
+
+export async function retryJob(id: number): Promise<ActionResult & { duplicate?: boolean }> {
+  const response = await request(`/api/auto_match_job/${id}/retry`, { method: 'POST' })
+  return await response.json()
+}
+
 export async function downloadEntries(
   key: string,
   filters: Record<string, string> = {},

@@ -59,6 +59,19 @@ class BaseModuleService:
         rows.append(entry)
         return entry, []
 
+    def update_entry(self, entry_id: int,
+                     values: dict[str, Any]) -> dict[str, Any] | None:
+        """更新可编辑字段（例如更正匹配规则的相似度阈值）。"""
+        entry = store.find(self.MODULE, entry_id)
+        if entry is None:
+            return None
+        for field in self.LIST_FIELDS:
+            if field in values:
+                entry[field] = values[field]
+        if values.get("status") in self.STATUS_ORDER:
+            entry["status"] = values["status"]
+        return entry
+
     def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
         entry = store.find(self.MODULE, entry_id)
         if entry is None:

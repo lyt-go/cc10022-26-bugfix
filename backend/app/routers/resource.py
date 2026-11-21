@@ -8,7 +8,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.schemas import ActionPayload, ActionResult, EntryPayload, PageResult
+from app.schemas import (
+    ActionPayload,
+    ActionResult,
+    EntryPayload,
+    EntryUpdatePayload,
+    PageResult,
+)
 from app.services import service_for
 
 router = APIRouter(prefix="/api", tags=["业务资源"])
@@ -82,6 +88,36 @@ def get_entry(module: str, entry_id: int) -> dict[str, Any]:
     return entry
 
 
+@router.get("/{module}/{entry_id}/detail", response_model=dict)
+def get_entry_detail(module: str, entry_id: int) -> dict[str, Any]:
+    """任务详情：输出与复核入口一致的簇数量、成员和规则/时间版本。"""
+    service = require_service(module)
+    if hasattr(service, "get_job_detail"):
+        detail = service.get_job_detail(entry_id)
+        if detail is not None:
+            return detail
+    entry = service.get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"{service.ENTITY} {entry_id} 不存在或已归档")
+    return entry
+
+
+@router.post("/{module}/{entry_id}/retry", response_model=ActionResult)
+def retry_entry(module: str, entry_id: int) -> ActionResult:
+    """失败任务重跑：恢复原始成员与可用规则，重新计算补跑簇输出。"""
+    service = require_service(module)
+    if hasattr(service, "retry_failed_job"):
+        result = service.retry_failed_job(entry_id)
+    else:
+        entry, message = service.run_action(entry_id, "重试")
+        return ActionResult(ok=entry is not None, message=message, entry=entry)
+    return ActionResult(
+        ok=bool(result.get("ok")),
+        message=str(result.get("message") or result.get("reason") or "匹配任务重试处理完成"),
+        entry=result.get("job"),
+    )
+
+
 @router.post("/{module}", response_model=ActionResult)
 def create_entry(module: str, payload: EntryPayload) -> ActionResult:
     service = require_service(module)
@@ -89,6 +125,16 @@ def create_entry(module: str, payload: EntryPayload) -> ActionResult:
     if missing:
         return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
     return ActionResult(ok=True, message=f"{service.ENTITY}已登记", entry=entry)
+
+
+@router.put("/{module}/{entry_id}", response_model=ActionResult)
+def update_entry(module: str, entry_id: int, payload: EntryUpdatePayload) -> ActionResult:
+    """更正条目字段（例如调整匹配规则的相似度阈值后重新补跑）。"""
+    service = require_service(module)
+    entry = service.update_entry(entry_id, payload.values)
+    if entry is None:
+        return ActionResult(ok=False, message=f"{service.ENTITY} {entry_id} 不存在或已归档")
+    return ActionResult(ok=True, message=f"{service.ENTITY}已更新", entry=entry)
 
 
 @router.post("/{module}/{entry_id}/actions", response_model=ActionResult)
